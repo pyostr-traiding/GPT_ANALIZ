@@ -1,0 +1,29 @@
+[project]
+name = "gpt-analiz"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "www",email = "pyostr@gmail.com"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic (>=2.12.3,<3.0.0)",
+    "pybit (>=5.12.0,<6.0.0)",
+    "python-dotenv (>=1.2.1,<2.0.0)",
+    "pytelegrambotapi (>=4.29.1,<5.0.0)",
+    "pika (>=1.3.2,<2.0.0)",
+    "google-cloud-aiplatform (>=1.126.1,<2.0.0)",
+    "google-generativeai (>=0.8.5,<0.9.0)",
+    "numpy (>=2.3.4,<3.0.0)",
+    "pandas (>=2.3.3,<3.0.0)",
+    "matplotlib (>=3.10.7,<4.0.0)",
+    "scikit-learn (>=1.7.2,<2.0.0)",
+    "boto3 (>=1.40.69,<2.0.0)",
+    "redis (>=7.0.1,<8.0.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
