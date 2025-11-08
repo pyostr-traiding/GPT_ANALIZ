@@ -7,7 +7,7 @@ networks:
 services:
   panel:
     build: ./
-    container_name: admin-panel
+    container_name: gpt-analiz
     command: poetry run main.py
     env_file: ./.env
     restart: always
