@@ -1,4 +1,4 @@
-FROM python:3.12
+FROM python:3.14
 
 # Установка переменных окружения
 ENV PYTHONUNBUFFERED 1
@@ -8,6 +8,7 @@ RUN pip install poetry
 
 # Создание рабочей директории
 RUN mkdir /code
+RUN mkdir /code/logs
 WORKDIR /code
 
 # Копирование файлов проекта
@@ -17,6 +18,3 @@ COPY . /code/
 # Установка зависимостей
 RUN poetry config virtualenvs.create false \
     && poetry install --no-interaction --no-ansi --no-root
-
-# Запуск приложения
-CMD ["poetry", "run", "python", "main.py"]

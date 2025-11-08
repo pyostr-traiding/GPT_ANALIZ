@@ -1,7 +1,15 @@
 version: '3.8'
 
+networks:
+  GLOBAL_NETWORK:
+    external: true
+
 services:
-  actions-gpt:
+  panel:
     build: ./
-    restart: unless-stopped
+    container_name: admin-panel
+    command: poetry run main.py
     env_file: ./.env
+    restart: always
+    networks:
+      - GLOBAL_NETWORK
