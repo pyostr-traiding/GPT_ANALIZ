@@ -17,7 +17,10 @@ def process_message(
     # if body is bytes:
     decode_message = body.decode('utf-8')
     json_message = json.loads(decode_message)
-    schema_message = ActionSchema.model_validate_json(json_message)
+    if isinstance(json_message, str):
+        schema_message = ActionSchema.model_validate_json(json_message)
+    else:
+        schema_message = ActionSchema(**json_message)
     if schema_message.action in ACTION_HANDLERS:
         for func in ACTION_HANDLERS[schema_message.action]:
             func(

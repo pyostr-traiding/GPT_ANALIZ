@@ -1,36 +1,31 @@
 """
-Системный анализ тренда
-
-Задача установка в базе данных значения текущего тренда
-
-Собираются данные по свечам
-
-Анализируется тренд, сила тренда, .....
-
-Далее GPT выдает направление и потенциальные точки разворота
-
+Системный анализ тренда через OpenRouter API с логированием действий и GPT перепиской
 """
 import datetime
+import json
+import requests
 
-from google import genai
-
-from API.gemini.api import send_gpt_data
-from API.panel.schemas.settings import SettingsBanSchema
 from app.core.accumulation.plotter import plot_market_and_report
 from app.core.klines import get_klines
 from app.core.mail import send_to_rabbitmq
 from app.core.trend.analysis import combine_multitimeframe_analysis, simplify_klines
 from app.core.trend.indicators.trend_analysis import analyze_market_current_trend
 from app.core.trend.indicators.trend_plot import plot_analysis
+from app.entrypoints.handlers.actions.schemas.actions import ActionSchema
+from app.core.scripts.ulils.s_redis import add_message
+from API.panel.schemas.settings import SettingsBanSchema
 from conf.settings import settings
 
+API_URL = 'https://openrouter.ai/api/v1/chat/completions'
+HEADERS_API = {"Authorization": f"Bearer {settings.OPENAI_API_KEY}"}
 
-def fetch_klines():
-    """Получение свечей для разных таймфреймов"""
-    return get_klines()  # kline_1, kline_15, kline_30, kline_60
+
+def fetch_klines(chat_uuid: str):
+    klines = get_klines()
+    return klines
+
 
 def analyze_trends(kline_1, kline_15, kline_30, kline_60):
-    """Анализ трендов для всех таймфреймов"""
     analysis_1m = analyze_market_current_trend(kline_1)
     analysis_15m = analyze_market_current_trend(kline_15)
     analysis_30m = analyze_market_current_trend(kline_30)
@@ -38,7 +33,8 @@ def analyze_trends(kline_1, kline_15, kline_30, kline_60):
     analyses = [analysis_1m, analysis_15m, analysis_30m, analysis_60m]
     weights = [1, 2, 3, 4]
     final_signal = combine_multitimeframe_analysis(analyses, weights)
-    data = {
+
+    return {
         "timeframes": {
             "1m": {"analysis": analysis_1m, "klines": simplify_klines(kline_1)},
             "15m": {"analysis": analysis_15m, "klines": simplify_klines(kline_15)},
@@ -47,28 +43,55 @@ def analyze_trends(kline_1, kline_15, kline_30, kline_60):
         },
         "final_signal": final_signal
     }
-    return data
 
-def get_result_from_text(text) -> SettingsBanSchema:
-    text_split = text.split('\n')
 
+def gpt_request(chat_uuid: str, prompt_name: str, data, action_data: ActionSchema):
+    """Отправка запроса GPT через OpenRouter API с логированием промпта и ответа"""
+    prompt_text = json.dumps({"prompt_name": prompt_name, "data": data})
+    # Логируем отправку запроса
+    add_message(chat_uuid, 'trend_analysis', 'text', prompt_text, role='user', code=action_data.extra.code, context=action_data.extra.context)
+
+    payload = {
+        "model": "gpt-4o-mini",
+        "messages": [{"role": "user", "content": prompt_text}],
+        "temperature": 0.7,
+        "max_tokens": 4096
+    }
+
+    try:
+        resp = requests.post(API_URL, headers=HEADERS_API, json=payload, timeout=60)
+        resp.raise_for_status()
+        resp_json = resp.json()
+        result = resp_json['choices'][0]['message']['content']
+
+        # Логируем ответ GPT
+        add_message(chat_uuid, 'trend_analysis', 'text', result, role='assistant', code=action_data.extra.code, context=action_data.extra.context)
+        return result
+    except Exception as e:
+        error_text = f"Ошибка GPT ({prompt_name}): {e}"
+        add_message(chat_uuid, 'trend_analysis', 'text', error_text, role='assistant', code=action_data.extra.code, context=action_data.extra.context)
+        print(error_text)
+        return None
+
+
+def get_result_from_text(text: str) -> SettingsBanSchema:
     trend_value = None
     turn_value = None
     position_value = None
-    print('-----------', text)
-    for i in text_split:
-        print('+++', i)
-        if 'Тренд%' in i:
-            i = i.replace('Тренд%', '').replace('%', '').replace(' ', '')
-            if i in ['ШОРТ', 'ЛОНГ', 'БОКОВОЙ']:
-              trend_value = i
-        elif 'Разворот%' in i:
-            i = i.replace('Разворот%', '').replace('%', '').replace(' ', '')
-            turn_value = i
-        elif 'Позиция%' in i:
-            i = i.replace('Позиция%', '').replace('%', '').replace(' ', '')
-            if i in ['ДА', 'НЕТ', 'СОМНИТЕЛЬНО']:
-                position_value = i
+
+    for line in text.split('\n'):
+        line = line.replace(' ', '')
+        if 'Тренд%' in line:
+            val = line.replace('Тренд%', '').replace('%', '')
+            if val in ['ШОРТ', 'ЛОНГ', 'БОКОВОЙ']:
+                trend_value = val
+        elif 'Разворот%' in line:
+            val = line.replace('Разворот%', '').replace('%', '')
+            turn_value = val
+        elif 'Позиция%' in line:
+            val = line.replace('Позиция%', '').replace('%', '')
+            if val in ['ДА', 'НЕТ', 'СОМНИТЕЛЬНО']:
+                position_value = val
 
     return SettingsBanSchema(
         side=trend_value,
@@ -76,39 +99,42 @@ def get_result_from_text(text) -> SettingsBanSchema:
         turn_value=float(turn_value) if turn_value else None,
     )
 
-def trend_analiz():
-    print('Запуск', datetime.datetime.now())
 
-    kline_1, kline_15, kline_30, kline_60 = fetch_klines()
+def trend_analiz(data: ActionSchema):
+    chat_uuid = str(datetime.datetime.now().timestamp())
+    add_message(chat_uuid, 'trend_analysis', 'text', 'Запуск анализа тренда', role='assistant', code=data.extra.code, context=data.extra.context)
+
+    kline_1, kline_15, kline_30, kline_60 = fetch_klines(chat_uuid)
+    add_message(chat_uuid, 'trend_analysis', 'text', 'Свечи получены', role='assistant', code=data.extra.code, context=data.extra.context)
 
     data_trend = analyze_trends(kline_1, kline_15, kline_30, kline_60)
+    add_message(chat_uuid, 'trend_analysis', 'text', 'Тренды обработаны', role='assistant', code=data.extra.code, context=data.extra.context)
 
-    image_trend, data_trend = plot_analysis(data_trend)
+    image_trend, _ = plot_analysis(data_trend)
+    image_zones, report_zones, _ = plot_market_and_report(kline_1, kline_15, kline_30, kline_60)
+    add_message(chat_uuid, 'trend_analysis', 'text', 'Графики построены', role='assistant', code=data.extra.code, context=data.extra.context)
 
-    image_zones, report_zones, data_zones = plot_market_and_report(kline_1, kline_15, kline_30, kline_60)
-    print('Данные готовы', datetime.datetime.now())
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
-    chat = client.chats.create(model="gemini-2.5-flash-lite")
-
-    gpt_answer_trend = send_gpt_data(chat=chat, prompt_name='trend_analiz_klines', data=data_trend)
+    gpt_answer_trend = gpt_request(chat_uuid, 'trend_analiz_klines', data_trend, action_data=data)
     if not gpt_answer_trend:
-        print('Нет ответа GPT тренд', gpt_answer_trend)
-        return 'Нет ответа GPT gpt_answer_trend'
-    gpt_answer_zone = send_gpt_data(chat=chat, prompt_name='zone_analiz', data=report_zones)
+        return None
+
+    gpt_answer_zone = gpt_request(chat_uuid, 'zone_analiz', report_zones, action_data=data)
     if not gpt_answer_zone:
-        print('Нет ответа GPT зоны', gpt_answer_trend)
-        return 'Нет ответа GPT gpt_answer_zone'
-    gpt_system_trend = send_gpt_data(chat=chat, prompt_name='system_trend')
+        return None
+
+    gpt_system_trend = gpt_request(chat_uuid, 'system_trend', None, action_data=data)
     if not gpt_system_trend:
-        print('Нет ответа GPT системно', gpt_answer_trend)
-        return 'Нет ответа GPT gpt_system_trend'
-    print('GPT сводка', datetime.datetime.now())
+        return None
+
+    add_message(chat_uuid, 'trend_analysis', 'text', 'GPT сводка готова', role='assistant', code=data.extra.code, context=data.extra.context)
+
     result = get_result_from_text(gpt_system_trend)
-    send_to_rabbitmq(
-        {
-            "is_test": True,
-            "notification": False,
-            "text": str(result)
-        }
-    )
+    add_message(chat_uuid, 'trend_analysis', 'text', f'Результат анализа: {result}', role='assistant', code=data.extra.code, context=data.extra.context)
+
+    send_to_rabbitmq({
+        "is_test": True,
+        "notification": False,
+        "text": str(result)
+    })
+
     return result

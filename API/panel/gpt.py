@@ -1,9 +1,10 @@
-from typing import Union
-
 import requests
 
-from API.panel.schemas.gpt import SettingsPromptSchema
+from typing import Union
+
 from conf.settings import settings
+
+from API.panel.schemas.gpt import SettingsPromptSchema
 
 
 def get_prompt(

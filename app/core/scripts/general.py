@@ -1,26 +1,30 @@
 import time
+import json
+import requests
 from uuid import uuid4
-
-from google import genai
 from telebot import types
 from telebot.types import Message
 
-from API.gemini.api import send_gpt_data
-from API.panel.gpt import get_prompt
-from app.core.accumulation.plotter import plot_market_and_report
 from app.core.scripts.ulils.s_redis import add_message
+from app.core.accumulation.plotter import plot_market_and_report
 from app.core.trend.analysis import combine_multitimeframe_analysis, simplify_klines
 from app.core.klines import get_klines
 from app.core.trend.indicators.trend_analysis import analyze_market_current_trend
 from app.core.trend.indicators.trend_plot import plot_analysis
+from app.entrypoints.handlers.actions.schemas.actions import ActionSchema
 from conf.settings import settings
 from utils.s3 import upload_image
+from app.entrypoints.decorators import action_handler
+
+HEADERS_API = {
+    "Authorization": f"Bearer {settings.OPENAI_API_KEY}",  # ключ в settings
+}
+API_URL = 'https://openrouter.ai/api/v1/chat/completions'
 
 
 # ---------------------- Вспомогательные функции ---------------------- #
 
 def send_updates(message: Message, text: str):
-    """Редактирует сообщение в Telegram с небольшой задержкой"""
     time.sleep(0.1)
     return settings.tg_client.edit_message_text(
         chat_id=message.chat.id,
@@ -29,21 +33,21 @@ def send_updates(message: Message, text: str):
     )
 
 
-def log_step(message: Message, chat_uuid: str, text: str):
-    """Обновляет сообщение и логирует действие"""
+def log_step(message: Message, chat_uuid: str, text: str, data: ActionSchema):
     message = send_updates(message, f"\n{text}")
     add_message(
         chat_uuid=chat_uuid,
         action='general_analysis',
         message_type='text',
         message=text.strip(),
-        role='assistant'
+        role='assistant',
+        context=data.extra.context,
+        code=data.extra.code,
     )
     return message
 
 
 def analyze_trends(kline_1, kline_15, kline_30, kline_60):
-    """Анализ трендов для всех таймфреймов"""
     analyses = [
         analyze_market_current_trend(kline_1),
         analyze_market_current_trend(kline_15),
@@ -64,42 +68,39 @@ def analyze_trends(kline_1, kline_15, kline_30, kline_60):
 
 
 def plot_zones(kline_1, kline_15, kline_30, kline_60):
-    """Построение зон и получение отчета по ним"""
     return plot_market_and_report(kline_1, kline_15, kline_30, kline_60)
 
 
-def gpt_step(chat, prompt_key: str, data, message: Message, chat_uuid: str, title: str):
-    """Выполняет шаг GPT анализа с логированием"""
-    message = log_step(message, chat_uuid, f"- Обработка {title}")
-    prompt = get_prompt(prompt_key)
+def gpt_step(chat_uuid: str, prompt_text: str, message: Message, title: str, data: ActionSchema):
+    message = log_step(message, chat_uuid, f"- Обработка {title}", data=data)
 
-    # Промпт — пользователь
-    add_message(
-        chat_uuid=chat_uuid,
-        action='general_analysis',
-        message_type='text',
-        message=prompt.prompt,
-        role='user'
-    )
+    # Записываем пользовательский промпт
+    add_message(chat_uuid, 'general_analysis', 'text', prompt_text, role='user', code=data.extra.code, context=data.extra.context)
 
-    result = send_gpt_data(chat=chat, prompt=prompt.prompt, data=data)
-    if not result:
-        log_step(message, chat_uuid, f"- ❌ Ошибка обработки {title}. Прервано.")
+    payload = {
+        "model": data.extra.code,
+        "messages": [{"role": "user", "content": prompt_text}],
+        "temperature": 0.7,
+        "max_tokens": 4096
+    }
+
+    try:
+        response = requests.post(API_URL, headers=HEADERS_API, json=payload, timeout=60)
+        response.raise_for_status()
+        resp_json = response.json()
+        gpt_result = resp_json['choices'][0]['message']['content']
+
+        add_message(chat_uuid, 'general_analysis', 'text', gpt_result, role='assistant', code=data.extra.code, context=data.extra.context)
+        return gpt_result
+
+    except Exception as e:
+        error_text = f"Ошибка GPT {title}: {str(e)}"
+        add_message(chat_uuid, 'general_analysis', 'text', error_text, role='assistant', code=data.extra.code, context=data.extra.context)
+        log_step(message, chat_uuid, f"- ❌ {error_text}", data=data)
         return None
 
-    # Ответ — ассистент
-    add_message(
-        chat_uuid=chat_uuid,
-        action='general_analysis',
-        message_type='text',
-        message=result,
-        role='assistant'
-    )
-    return result
 
-
-def send_final_report(message: Message, gpt_text: str, image_trend, image_zones, chat_uuid: str):
-    """Отправка финального отчёта и изображений в Telegram"""
+def send_final_report(message: Message, gpt_text: str, image_trend, image_zones, chat_uuid: str, data: ActionSchema ):
     try:
         MAX_CAPTION_LEN = 1000
         caption = gpt_text[:MAX_CAPTION_LEN]
@@ -117,81 +118,54 @@ def send_final_report(message: Message, gpt_text: str, image_trend, image_zones,
             settings.tg_client.send_message(chat_id=message.chat.id, text=rest[i:i + 1000])
 
         return True
-
     except Exception as e:
-        log_step(message, chat_uuid, f"- ❌ Ошибка отправки: {e}")
-        try:
-            settings.tg_client.send_media_group(
-                chat_id=message.chat.id,
-                media=[
-                    types.InputMediaPhoto(media=image_trend),
-                    types.InputMediaPhoto(media=image_zones),
-                ]
-            )
-            for i in range(0, len(gpt_text), 1000):
-                settings.tg_client.send_message(chat_id=message.chat.id, text=gpt_text[i:i + 1000])
-            return True
-        except:
-            return False
+        log_step(message, chat_uuid, f"- ❌ Ошибка отправки: {e}", data=data)
+        return False
 
 
 # ---------------------- Основной сценарий ---------------------- #
 
-def general_script(message: Message, tg_id: str):
-    chat_uuid = str(uuid4())  # единый UUID на весь цикл
+@action_handler(['general_analysis'])
+def general_script(message: Message, data: ActionSchema):
+    chat_uuid = str(uuid4())
 
-    # --- Сбор данных ---
-    message = log_step(message, chat_uuid, "\n\n- 📊 Сбор и подготовка данных")
+    message = log_step(message, chat_uuid, "\n\n- 📊 Сбор и подготовка данных", data=data)
     kline_1, kline_15, kline_30, kline_60 = get_klines()
-    message = log_step(message, chat_uuid, "- Свечи получены")
+    message = log_step(message, chat_uuid, "- Свечи получены", data=data)
 
-    # --- Анализ трендов ---
     data_trend = analyze_trends(kline_1, kline_15, kline_30, kline_60)
-    message = log_step(message, chat_uuid, "- Тренды обработаны")
+    message = log_step(message, chat_uuid, "- Тренды обработаны", data=data)
 
     image_trend, data_trend = plot_analysis(data_trend)
-    message = log_step(message, chat_uuid, "- Анализ тренда завершён")
+    message = log_step(message, chat_uuid, "- Анализ тренда завершён", data=data)
 
-    # --- Зоны ---
     image_zones, report_zones, data_zones = plot_zones(kline_1, kline_15, kline_30, kline_60)
-    message = log_step(message, chat_uuid, "- Зоны построены")
+    message = log_step(message, chat_uuid, "- Зоны построены", data=data)
 
-    # --- Загрузка изображений ---
     img_zones = upload_image(f"image_zones-{chat_uuid}", image_zones)
     img_trend = upload_image(f"image_trend-{chat_uuid}", image_trend)
+    add_message(chat_uuid, 'general_analysis', 'img_url', img_zones, role='assistant', context=data.extra.context, code=data.extra.code)
+    add_message(chat_uuid, 'general_analysis', 'img_url', img_trend, role='assistant', context=data.extra.context, code=data.extra.code)
 
-    add_message(chat_uuid, 'general_analysis', 'img_url', img_zones, role='assistant')
-    add_message(chat_uuid, 'general_analysis', 'img_url', img_trend, role='assistant')
+    message = log_step(message, chat_uuid, "\n\n- 🤖 GPT обработка", data=data)
 
-    # --- GPT обработка ---
-    message = log_step(message, chat_uuid, "\n\n- 🤖 GPT обработка")
-    client = genai.Client(api_key=settings.GEMINI_API_KEY)
-    chat = client.chats.create(model="gemini-2.5-flash")
-
-    # Анализ тренда
-    gpt_trend = gpt_step(chat, 'trend_analiz_klines', data_trend, message, chat_uuid, 'тренда')
+    # GPT анализ тренда
+    gpt_trend = gpt_step(chat_uuid, json.dumps(data_trend), message, 'тренда', data=data)
     if not gpt_trend:
         return True
 
-    # Анализ зон
-    gpt_zone = gpt_step(chat, 'zone_analiz', report_zones, message, chat_uuid, 'зон')
+    # GPT анализ зон
+    gpt_zone = gpt_step(chat_uuid, json.dumps(report_zones), message, 'зон', data=data)
     if not gpt_zone:
         return True
 
     # Финальное сведение
-    message = log_step(message, chat_uuid, "- Сведение информации")
-    prompt_final = get_prompt('zone_analiz_final')
-
-    add_message(chat_uuid, 'general_analysis', 'text', prompt_final.prompt, role='user')
-    gpt_final = send_gpt_data(chat=chat, prompt='zone_analiz_final')
-
+    message = log_step(message, chat_uuid, "- Сведение информации", data=data)
+    prompt_final = "Объедини анализ тренда и зон в краткий финальный отчет"
+    gpt_final = gpt_step(chat_uuid, prompt_final, message, 'финальный отчет', data=data)
     if not gpt_final:
-        log_step(message, chat_uuid, "- ❌ Ошибка финальной обработки. Прервано.")
         return True
 
-    add_message(chat_uuid, 'general_analysis', 'text', gpt_final, role='assistant')
-
-    # --- Отправка результатов ---
     image_trend.seek(0)
     image_zones.seek(0)
-    return send_final_report(message, gpt_final, image_trend, image_zones, chat_uuid)
+    return send_final_report(message, gpt_final, image_trend, image_zones, chat_uuid, data=data)

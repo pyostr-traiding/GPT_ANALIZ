@@ -21,7 +21,9 @@ def add_message(
         action: str,
         message_type: str,
         message: str,
-        role: Literal['assistant', 'user']  = 'assistant',
+        code: str,
+        context: int,
+        role: Literal['assistant', 'user'],
 ):
     """
 
@@ -33,6 +35,8 @@ def add_message(
         'message_type': message_type,
         'message': message,
         'role': role,
+        'code': code,
+        'context': context,
         'dt': str(datetime.datetime.now(datetime.UTC)),
     }
     key = f'chat:{chat_uuid}:{action}'

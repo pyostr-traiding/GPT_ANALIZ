@@ -1,9 +1,11 @@
-import ast
 import os
 
 import boto3
+
 from boto3.resources.base import ServiceResource
+
 from dotenv import load_dotenv
+
 from telebot import TeleBot
 
 load_dotenv()
@@ -28,6 +30,6 @@ class Settings:
         aws_secret_access_key=os.getenv('AWS_SECRET_ACCESS_KEY'),
         endpoint_url='https://s3.timeweb.com',
     )
-
+    OPENAI_API_KEY = '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'
 
 settings = Settings()

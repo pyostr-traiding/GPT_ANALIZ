@@ -21,10 +21,7 @@ def handle_general_analiz(
 
     result = general_script(
         message=message,
-        tg_id=data.tg_id,
+        data=data,
     )
-    if result:
-        channel.basic_ack(delivery_tag=method.delivery_tag)
-        return
-    channel.basic_nack(delivery_tag=method.delivery_tag, requeue=True)
+    channel.basic_ack(delivery_tag=method.delivery_tag)
 

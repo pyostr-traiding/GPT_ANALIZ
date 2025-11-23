@@ -27,7 +27,7 @@ def handle_trend_analiz(
 
     Задача установка в базе данных значения текущего тренда
     """
-    result = trend_analiz()
+    result = trend_analiz(data=data)
 
     channel.basic_ack(delivery_tag=method.delivery_tag)
     if isinstance(result, str):
