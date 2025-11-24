@@ -1,6 +1,6 @@
 import datetime
 from conf.settings import settings
-from app.ByBit.kline import Klines
+from API.ByBit.kline import Klines
 
 
 def get_klines():

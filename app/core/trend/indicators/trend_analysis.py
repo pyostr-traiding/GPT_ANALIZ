@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.linear_model import LinearRegression
 from sklearn.cluster import KMeans
 from scipy.signal import argrelextrema
-from app.ByBit.kline import Klines
+from API.ByBit.kline import Klines
 
 
 def analyze_market_current_trend(

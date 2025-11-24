@@ -8,9 +8,8 @@ from typing import List, Dict, Tuple
 from pika.spec import Basic
 from pika.adapters.blocking_connection import BlockingChannel
 
-from app.core.scripts.ulils.s_redis import get_chat, add_message
-from app.entrypoints.decorators import action_handler
-from app.entrypoints.handlers.actions.schemas.actions import ActionSchema
+from app.entrypoints.s_redis import get_chat, add_message
+from app.entrypoints.schemas.actions import ActionSchema
 from conf.settings import settings
 
 HEADERS_API = {
@@ -64,7 +63,6 @@ def trim_chat_history(messages: List[Dict[str, str]], encoding, max_tokens: int)
     return trimmed, count_chat_tokens(trimmed, encoding)
 
 
-@action_handler(['new_message_in_chat'])
 def handle_new_message_in_chat(
         channel: BlockingChannel,
         method: Basic.Deliver,
@@ -74,7 +72,6 @@ def handle_new_message_in_chat(
     uuid_parts = data.extra.uuid.split(':')
     if len(uuid_parts) < 3:
         print(f"Invalid UUID format: {data.extra.uuid}")
-        channel.basic_ack(delivery_tag=method.delivery_tag)
         return
 
     chat_uuid = uuid_parts[1]
@@ -166,4 +163,3 @@ def handle_new_message_in_chat(
             code=data.extra.code, context=data.extra.context
         )
 
-    channel.basic_ack(delivery_tag=method.delivery_tag)

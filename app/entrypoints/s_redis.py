@@ -23,7 +23,7 @@ def add_message(
         message: str,
         code: str,
         context: int,
-        role: Literal['assistant', 'user'],
+        role: Literal['assistant', 'user', 'system'],
 ):
     """
 

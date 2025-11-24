@@ -8,9 +8,9 @@ from typing import List, Dict, Tuple
 
 from pika.adapters.blocking_connection import BlockingChannel
 
-from app.core.scripts.ulils.s_redis import get_chat, add_message
+from app.entrypoints.s_redis import get_chat, add_message
 from app.entrypoints.decorators import action_handler
-from app.entrypoints.handlers.actions.schemas.actions import ActionSchema
+from app.entrypoints.schemas.actions import ActionSchema
 
 HEADERS_API = {
     "Authorization": "Bearer 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",
@@ -173,7 +173,6 @@ def handle_new_message_in_chat(
         )
 
     # Ack в любом случае
-    channel.basic_ack(delivery_tag=method.delivery_tag)
     # except Exception as e:
     #     print(e)
     #     add_message(
