@@ -5,10 +5,11 @@ from dotenv import load_dotenv
 from pika.exceptions import AMQPConnectionError, ChannelClosed, ConnectionClosed
 
 from app.entrypoints.proccess_message import process_message
+from conf.settings import settings
 
 load_dotenv()
 
-RABBITMQ_URL = os.getenv('URL_RABBITMQ')
+RABBITMQ_URL = settings.RABBITMQ_URL
 RECONNECT_DELAY = 2  # секунд
 
 

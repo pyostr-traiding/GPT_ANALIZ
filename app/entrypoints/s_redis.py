@@ -6,12 +6,14 @@ from typing import Literal
 import redis
 from dotenv import load_dotenv
 
+from conf.settings import settings
+
 load_dotenv()
 
 redis_server = redis.Redis(
-    host=os.getenv('REDIS_HOST'),
-    password=os.getenv('REDIS_PASSWORD'),
-    port=int(os.getenv('REDIS_PORT')),
+    host=settings.REDIS_HOST,
+    password=settings.REDIS_PASSWORD,
+    port=settings.REDIS_PORT,
     db=5,
     decode_responses=True
 )

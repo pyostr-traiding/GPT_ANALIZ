@@ -5,17 +5,19 @@ from datetime import datetime
 import pika
 from dotenv import load_dotenv
 
+from conf.settings import settings
+
 load_dotenv()
 
 credentials = pika.PlainCredentials(
-    username=os.getenv('RABBITMQ_USERNAME'),
-    password=os.getenv('RABBITMQ_PASSWORD')
+    username=settings.RABBITMQ_USERNAME,
+    password=settings.RABBITMQ_PASSWORD,
 )
 
 connection_params = pika.ConnectionParameters(
-    host=os.getenv('RABBITMQ_HOST'),
-    port=os.getenv('RABBITMQ_PORT'),
-    virtual_host=os.getenv('RABBITMQ_VIRTUAL_HOST'),
+    host=settings.RABBITMQ_HOST,
+    port=settings.RABBITMQ_PORT,
+    virtual_host=settings.RABBITMQ_VIRTUAL_HOST,
     credentials=credentials
 )
 

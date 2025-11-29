@@ -12,9 +12,9 @@ def upload_image(
         buf: bytes,
 ):
     Key = f'media/{file_name}.jpg'
-    res = settings.s3_client.Bucket(os.getenv('AWS_STORAGE_BUCKET_NAME')).put_object(
+    res = settings.s3_client.Bucket(settings.AWS_STORAGE_BUCKET_NAME).put_object(
         Key=Key,
         Body=buf,
         ContentType='image/jpeg'
     )
-    return os.getenv('S3_BASE_URL') + Key
+    return settings.S3_URL + Key
