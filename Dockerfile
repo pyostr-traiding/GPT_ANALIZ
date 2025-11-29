@@ -1,4 +1,4 @@
-FROM python:3.14
+FROM python:3.12
 
 # Установка переменных окружения
 ENV PYTHONUNBUFFERED 1
